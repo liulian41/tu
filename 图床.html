@@ -78,7 +78,7 @@
   .gallery-head span{font-size:12px;color:#9188ad}
   
   .grid{
-    display:flex;flex-direction:column;gap:10px; /* 改为单列纵向 */
+    display:flex;flex-direction:column;gap:10px;
   }
   .empty{width:100%;padding:40px 0;text-align:center;color:#a49bc0;font-size:14px}
   
@@ -141,7 +141,6 @@
   
   @media(max-width:600px){
     .topbar{padding:14px 16px}
-    /* 手机上让链接和按钮自动换行，防止挤压 */
     .bottom-row{flex-wrap:wrap}
     .link{width:100%;flex:auto}
     .actions{width:100%;justify-content:flex-end;margin-top:4px}
@@ -200,21 +199,27 @@
 <div id="toastWrap"></div>
 
 <script>
-/* ===================== 配置区（改这里就行） ===================== */
+/* ===================== 配置区 ===================== */
 const OWNER  = 'liulian41';   // GitHub 用户名
 const REPO   = 'yu';          // 仓库名
 const BRANCH = 'main';        // 分支
 
-const SITE_BASE = `https://${OWNER}.github.io/${REPO}`;          // 外链前缀
+const SITE_BASE = `https://${OWNER}.github.io/${REPO}`;
 const API_BASE  = `https://api.github.com/repos/${OWNER}/${REPO}/contents`;
 const TOKEN_KEY = 'gh_pages_image_host_token';
-/* ================================================================ */
+const TIME_KEY  = 'gh_pages_image_upload_times'; // 记录上传时间的键名
+/* =================================================== */
 
 const IMAGE_EXT = ['jpg','jpeg','png','gif','webp','svg','bmp','ico'];
 const AUDIO_EXT = ['mp3','wav','m4a','ogg','flac','aac'];
 
 const $ = s => document.querySelector(s);
 let files = [];
+let uploadTimes = {}; // 存放 文件名 => 时间戳
+
+try {
+  uploadTimes = JSON.parse(localStorage.getItem(TIME_KEY) || '{}');
+} catch(e) { uploadTimes = {}; }
 
 /* ---------- 工具函数 ---------- */
 function getToken(){ return localStorage.getItem(TOKEN_KEY) || ''; }
@@ -365,6 +370,11 @@ async function doUpload(file){
     await uploadContent(file.name, base64, p => setRowProgress(row, p));
     setRowState(row, 'done', '✔ 上传成功');
     toast(`${file.name} 上传成功`, 'success');
+    
+    // 记录上传时间，用于图库排序
+    uploadTimes[file.name] = Date.now();
+    localStorage.setItem(TIME_KEY, JSON.stringify(uploadTimes));
+    
   } catch(err){
     setRowState(row, 'fail', '✘ ' + err.message);
     toast(`${file.name} 上传失败：${err.message}`, 'error');
@@ -378,8 +388,9 @@ async function handleFiles(fileList){
     toast('请先在上方保存 GitHub Token', 'error');
     return;
   }
+  // 顺序上传
   for (const f of arr){
-    await doUpload(f);   // 顺序上传，避免并发冲突
+    await doUpload(f); 
   }
   await loadGallery();
 }
@@ -416,7 +427,23 @@ function makeBtn(text, cls){
 function renderGallery(){
   const gallery = $('#gallery');
   gallery.innerHTML = '';
-  const items = files.filter(f => isAllowed(f.name));
+  let items = files.filter(f => isAllowed(f.name));
+  
+  // ======== 排序逻辑开始 ========
+  items.sort((a, b) => {
+    const timeA = uploadTimes[a.name] || 0;
+    const timeB = uploadTimes[b.name] || 0;
+    
+    // 如果两者都有本地记录（或者一个有记录，另一个直接用文件名字典序）
+    if (timeA !== timeB) {
+      return timeB - timeA; // 降序：最新上传的排在前面
+    }
+    
+    // 本地都没有记录的旧文件，按自然数字顺序倒序排列（通常是基于文件名的生成时间）
+    return b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' });
+  });
+  // ======== 排序逻辑结束 ========
+
   $('#count').textContent = `共 ${items.length} 个文件`;
 
   if (!items.length){
@@ -521,6 +548,13 @@ async function onDelete(file){
     if (!res.ok) throw new Error(await errorMessage(res));
     toast('已删除', 'success');
     files = files.filter(x => x.path !== file.path);
+    
+    // 删除本地时间记录
+    if (uploadTimes[file.name]) {
+      delete uploadTimes[file.name];
+      localStorage.setItem(TIME_KEY, JSON.stringify(uploadTimes));
+    }
+    
     renderGallery();
   } catch(err){
     toast('删除失败：' + err.message, 'error');
@@ -572,7 +606,6 @@ function bindEvents(){
     dz.classList.remove('drag');
     if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
   });
-  // 防止拖到页面其他地方时浏览器直接打开文件
   window.addEventListener('dragover', e => e.preventDefault());
   window.addEventListener('drop', e => e.preventDefault());
 }
