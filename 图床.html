@@ -84,34 +84,50 @@
   }
   
   /* ======== 图库列表模式 ======== */
-  .gallery-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .gallery-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px}
+  .gallery-head-left{display:flex;align-items:center;gap:12px}
   .gallery-head h2{margin:0}
   .gallery-head span{font-size:12px;color:#9188ad}
   
+  .gallery-tools{display:flex;align-items:center;gap:12px;font-size:13px;color:#6a3df5;font-weight:600;}
+  .gallery-tools label{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
+  .gallery-tools input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:#7c4dff;}
+  #batchDeleteBtn{display:none;}
+
   .grid{
     display:flex;flex-direction:column;gap:10px;
   }
   .empty{width:100%;padding:40px 0;text-align:center;color:#a49bc0;font-size:14px}
   
   .item{
-    display:flex;align-items:center;gap:12px;padding:10px;
+    display:flex;align-items:center;gap:10px;padding:10px;
     background:#fff;border:1px solid #eee8fb;border-radius:12px;
     box-shadow:0 2px 8px rgba(90,70,160,.05);
-    transition:box-shadow .18s;
+    transition:box-shadow .18s,border-color .18s;
   }
   .item:hover{
     box-shadow:0 4px 14px rgba(124,77,255,.15);
+  }
+  .item.selected{
+    border-color:#a855f7;background:#fdfcff;
+  }
+  .item-checkbox{
+    width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:#7c4dff;
   }
   
   /* 缩略图区域 */
   .media{
     width:76px;height:76px;flex-shrink:0;
     border-radius:8px;overflow:hidden;background:#f6f4fd;
-    display:flex;align-items:center;justify-content:center;
+    display:flex;align-items:center;justify-content:center;position:relative;
   }
   .media img{width:100%;height:100%;object-fit:cover;display:block}
   .media audio{width:76px;height:100%;object-fit:contain;padding:0 4px}
-  .noimg{font-size:11px;color:#b3aacb;text-align:center;padding:0 4px}
+  .err-box{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;
+    background:#f6f4fd;cursor:pointer;
+  }
+  .err-box span{font-size:11px;color:#e5484d;margin-bottom:4px}
   
   /* 信息区域 */
   .meta{
@@ -191,7 +207,7 @@
     </div>
     <div id="uploadList"></div>
     
-    <!-- 一键复制本次导入区域 (默认隐藏) -->
+    <!-- 一键复制本次导入区域 -->
     <div id="batchCopyWrap">
       <button class="btn" id="batchCopyBtn">✨ 一键复制刚刚导入的链接</button>
     </div>
@@ -200,16 +216,21 @@
   <!-- 图库 -->
   <section class="card">
     <div class="gallery-head">
-      <h2>③ 图库</h2>
-      <span id="count">共 0 个文件</span>
+      <div class="gallery-head-left">
+        <h2>③ 图库</h2>
+        <span id="count">共 0 个文件</span>
+      </div>
+      <div class="gallery-tools">
+        <label><input type="checkbox" id="selectAllBtn" /> 全选</label>
+        <button class="btn small danger" id="batchDeleteBtn" type="button">删除选中</button>
+      </div>
     </div>
     <div class="grid" id="gallery"></div>
   </section>
 </main>
 
 <div class="footer">
-  提示：新上传的文件在 GitHub Pages 上可能需要几十秒到几分钟才能生效，刷新图库或稍等即可。<br>
-  复制的链接格式为 <code>https://用户名.github.io/仓库名/文件名</code>，可直接插入博客 / Markdown。
+  提示：若图片显示加载失败，点击图片上的“重试”按钮即可刷新（国内访问 github.io 偶尔会抽风，也可以尝试切换 4G/5G 或稍等几分钟再试）。
 </div>
 
 <div id="toastWrap"></div>
@@ -387,7 +408,6 @@ async function doUpload(file){
     setRowState(row, 'done', '✔ 上传成功');
     toast(`${file.name} 上传成功`, 'success');
     
-    // 记录时间与本次批量链接
     uploadTimes[file.name] = Date.now();
     localStorage.setItem(TIME_KEY, JSON.stringify(uploadTimes));
     currentBatchUrls.push(urlOf(file.name));
@@ -406,8 +426,8 @@ async function handleFiles(fileList){
     return;
   }
   
-  currentBatchUrls = []; // 每次导入前清空
-  $('#batchCopyWrap').style.display = 'none'; // 隐藏之前的按钮
+  currentBatchUrls = []; 
+  $('#batchCopyWrap').style.display = 'none';
   
   for (const f of arr){
     await doUpload(f); 
@@ -415,12 +435,10 @@ async function handleFiles(fileList){
   
   await loadGallery();
   
-  // 如果本次导入有成功的，显示一键复制按钮
   if (currentBatchUrls.length > 0) {
     const btn = $('#batchCopyBtn');
     btn.textContent = `✨ 一键复制刚刚导入的 ${currentBatchUrls.length} 个链接`;
     $('#batchCopyWrap').style.display = 'block';
-    // 滚动到底部提示用户
     window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   }
 }
@@ -457,15 +475,16 @@ function makeBtn(text, cls){
 function renderGallery(){
   const gallery = $('#gallery');
   gallery.innerHTML = '';
+  $('#selectAllBtn').checked = false;
+  $('#batchDeleteBtn').style.display = 'none';
   
   let items = files.filter(f => isAllowed(f.name));
   
-  // 排序逻辑
   items.sort((a, b) => {
     const timeA = uploadTimes[a.name] || 0;
     const timeB = uploadTimes[b.name] || 0;
     if (timeA !== timeB) {
-      return timeB - timeA; // 最新上传的排在前面
+      return timeB - timeA; 
     }
     return b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' });
   });
@@ -487,22 +506,43 @@ function renderGallery(){
     const card = document.createElement('div');
     card.className = 'item';
 
+    /* 复选框 */
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'item-checkbox';
+    cb.value = f.name; // 存文件名
+    cb.addEventListener('change', () => {
+      card.classList.toggle('selected', cb.checked);
+      updateDeleteBtnState();
+    });
+
     /* 预览区 */
     const media = document.createElement('div');
     media.className = 'media';
+    
     if (isImage(f.name)){
-      const img = document.createElement('img');
-      img.loading = 'lazy';
-      img.alt = f.name;
-      img.src = url;
-      img.addEventListener('error', () => {
+      const loadImg = (isRetry) => {
         media.innerHTML = '';
-        const s = document.createElement('span');
-        s.className = 'noimg';
-        s.textContent = '加载失败';
-        media.appendChild(s);
-      });
-      media.appendChild(img);
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.alt = f.name;
+        // 重试时加上时间戳打破浏览器缓存
+        img.src = isRetry ? url + '?t=' + Date.now() : url;
+        
+        img.addEventListener('error', () => {
+          media.innerHTML = '';
+          const errBox = document.createElement('div');
+          errBox.className = 'err-box';
+          errBox.innerHTML = '<span>加载失败</span><button class="btn small" style="padding:2px 6px;font-size:10px;">重试</button>';
+          errBox.addEventListener('click', (e) => {
+            e.stopPropagation();
+            loadImg(true);
+          });
+          media.appendChild(errBox);
+        });
+        media.appendChild(img);
+      };
+      loadImg(false);
     } else {
       const audio = document.createElement('audio');
       audio.controls = true;
@@ -549,11 +589,42 @@ function renderGallery(){
     bottomRow.append(link, actions);
     meta.append(nameEl, bottomRow);
     
-    card.append(media, meta);
+    card.append(cb, media, meta);
     frag.appendChild(card);
   });
 
   gallery.appendChild(frag);
+}
+
+/* 更新批量删除按钮的状态 */
+function updateDeleteBtnState() {
+  const allCbs = document.querySelectorAll('.item-checkbox');
+  const checkedCbs = document.querySelectorAll('.item-checkbox:checked');
+  const selectAllBtn = $('#selectAllBtn');
+  const batchDeleteBtn = $('#batchDeleteBtn');
+  
+  // 控制删除按钮显隐
+  if (checkedCbs.length > 0) {
+    batchDeleteBtn.style.display = 'inline-block';
+    batchDeleteBtn.textContent = `删除选中 (${checkedCbs.length})`;
+  } else {
+    batchDeleteBtn.style.display = 'none';
+  }
+  
+  // 控制全选框状态
+  if (allCbs.length === 0) {
+    selectAllBtn.checked = false;
+    selectAllBtn.indeterminate = false;
+  } else if (checkedCbs.length === allCbs.length) {
+    selectAllBtn.checked = true;
+    selectAllBtn.indeterminate = false;
+  } else if (checkedCbs.length === 0) {
+    selectAllBtn.checked = false;
+    selectAllBtn.indeterminate = false;
+  } else {
+    selectAllBtn.checked = false;
+    selectAllBtn.indeterminate = true; // 半选状态
+  }
 }
 
 /* ---------- 删除 ---------- */
@@ -573,8 +644,9 @@ async function onDelete(file){
     });
     if (!res.ok) throw new Error(await errorMessage(res));
     toast('已删除', 'success');
-    files = files.filter(x => x.path !== file.path);
     
+    // 本地清理
+    files = files.filter(x => x.path !== file.path);
     if (uploadTimes[file.name]) {
       delete uploadTimes[file.name];
       localStorage.setItem(TIME_KEY, JSON.stringify(uploadTimes));
@@ -582,6 +654,58 @@ async function onDelete(file){
     renderGallery();
   } catch(err){
     toast('删除失败：' + err.message, 'error');
+  }
+}
+
+/* 批量删除 */
+async function batchDelete() {
+  const checkedCbs = document.querySelectorAll('.item-checkbox:checked');
+  if (checkedCbs.length === 0) return;
+  
+  const namesToDelete = Array.from(checkedCbs).map(cb => cb.value);
+  if (!confirm(`确定删除选中的 ${namesToDelete.length} 个文件吗？该操作不可恢复。`)) return;
+
+  toast(`开始删除 ${namesToDelete.length} 个文件...`, 'info');
+  $('#batchDeleteBtn').disabled = true;
+  $('#batchDeleteBtn').textContent = '删除中...';
+
+  let success = 0;
+  let failed = 0;
+
+  for (const name of namesToDelete) {
+    const file = files.find(f => f.name === name);
+    if (!file) continue;
+
+    try {
+      const res = await fetch(`${API_BASE}/${encPath(name)}`, {
+        method: 'DELETE',
+        headers: Object.assign({}, authHeaders(), { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          message: `delete ${name}`,
+          sha: file.sha,
+          branch: BRANCH
+        })
+      });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      
+      // 本地清理
+      files = files.filter(x => x.path !== file.path);
+      if (uploadTimes[name]) delete uploadTimes[name];
+      success++;
+    } catch (err) {
+      console.error('删除失败:', name, err);
+      failed++;
+    }
+  }
+
+  localStorage.setItem(TIME_KEY, JSON.stringify(uploadTimes));
+  renderGallery();
+  $('#batchDeleteBtn').disabled = false;
+  
+  if (failed === 0) {
+    toast(`成功删除 ${success} 个文件`, 'success');
+  } else {
+    toast(`删除完成：成功 ${success} 个，失败 ${failed} 个`, 'error');
   }
 }
 
@@ -613,7 +737,7 @@ function bindEvents(){
   // 一键复制本次导入
   $('#batchCopyBtn').addEventListener('click', async () => {
     if (currentBatchUrls.length === 0) return;
-    const text = currentBatchUrls.join('\n'); // 一行一个链接
+    const text = currentBatchUrls.join('\n'); 
     const ok = await copyText(text);
     if (ok) {
       toast(`已成功复制刚刚导入的 ${currentBatchUrls.length} 个链接！`, 'success');
@@ -621,6 +745,19 @@ function bindEvents(){
       toast('复制失败，请检查浏览器权限', 'error');
     }
   });
+
+  // 全选控制
+  $('#selectAllBtn').addEventListener('change', (e) => {
+    const isChecked = e.target.checked;
+    document.querySelectorAll('.item-checkbox').forEach(cb => {
+      cb.checked = isChecked;
+      cb.closest('.item').classList.toggle('selected', isChecked);
+    });
+    updateDeleteBtnState();
+  });
+
+  // 批量删除
+  $('#batchDeleteBtn').addEventListener('click', batchDelete);
 
   // 上传区
   const dz = $('#dropzone');
