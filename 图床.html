@@ -72,7 +72,7 @@
   .urow.fail .ustate{color:#e5484d}
   .urow.fail .ubar i{background:#e5484d}
   
-  /* 批量复制本次上传按钮区 */
+  /* 批量复制本次导入按钮区 */
   #batchCopyWrap{
     display:none;margin-top:15px;padding-top:15px;border-top:1px dashed #e3ddf7;
     text-align:center;
@@ -83,12 +83,10 @@
     box-shadow:0 4px 12px rgba(47,158,68,.25);
   }
   
-  /* ======== 图库列表模式 (紧凑) ======== */
-  .gallery-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px}
+  /* ======== 图库列表模式 ======== */
+  .gallery-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
   .gallery-head h2{margin:0}
-  .gallery-tools{display:flex;align-items:center;gap:12px;font-size:13px;color:#6a3df5;font-weight:600;}
-  .gallery-tools label{display:flex;align-items:center;gap:5px;cursor:pointer;}
-  .gallery-tools input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:#7c4dff;}
+  .gallery-head span{font-size:12px;color:#9188ad}
   
   .grid{
     display:flex;flex-direction:column;gap:10px;
@@ -96,19 +94,13 @@
   .empty{width:100%;padding:40px 0;text-align:center;color:#a49bc0;font-size:14px}
   
   .item{
-    display:flex;align-items:center;gap:10px;padding:10px;
+    display:flex;align-items:center;gap:12px;padding:10px;
     background:#fff;border:1px solid #eee8fb;border-radius:12px;
     box-shadow:0 2px 8px rgba(90,70,160,.05);
-    transition:box-shadow .18s, border-color .18s;
+    transition:box-shadow .18s;
   }
   .item:hover{
     box-shadow:0 4px 14px rgba(124,77,255,.15);
-  }
-  .item.selected{
-    border-color:#a855f7;background:#fdfcff;
-  }
-  .item-checkbox{
-    width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:#7c4dff;
   }
   
   /* 缩略图区域 */
@@ -190,7 +182,7 @@
 
   <!-- 上传 -->
   <section class="card">
-    <h2>② 上传文件</h2>
+    <h2>② 导入文件</h2>
     <div class="dropzone" id="dropzone">
       <div>拖拽文件到这里，或 <strong>点击选择文件</strong>（支持多选）</div>
       <div class="fmt">图片：jpg / png / gif / webp / svg / bmp / ico　·　音频：mp3 / wav / m4a / ogg / flac / aac</div>
@@ -198,9 +190,10 @@
         accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.ico,.mp3,.wav,.m4a,.ogg,.flac,.aac,image/*,audio/*" />
     </div>
     <div id="uploadList"></div>
-    <!-- 批量复制本次上传的按钮（默认隐藏） -->
+    
+    <!-- 一键复制本次导入区域 (默认隐藏) -->
     <div id="batchCopyWrap">
-      <button class="btn" id="batchCopyBtn">复制本次上传的链接</button>
+      <button class="btn" id="batchCopyBtn">✨ 一键复制刚刚导入的链接</button>
     </div>
   </section>
 
@@ -208,11 +201,7 @@
   <section class="card">
     <div class="gallery-head">
       <h2>③ 图库</h2>
-      <div class="gallery-tools">
-        <label><input type="checkbox" id="selectAllBtn" /> 全选</label>
-        <button class="btn small purple" id="batchCopySelectedBtn" type="button">复制选中链接</button>
-        <span id="count" style="font-size:12px;color:#9188ad;font-weight:normal;margin-left:8px;">共 0 个文件</span>
-      </div>
+      <span id="count">共 0 个文件</span>
     </div>
     <div class="grid" id="gallery"></div>
   </section>
@@ -243,7 +232,7 @@ const AUDIO_EXT = ['mp3','wav','m4a','ogg','flac','aac'];
 const $ = s => document.querySelector(s);
 let files = [];
 let uploadTimes = {};
-let currentBatchUrls = []; // 记录本次拖拽/选择上传成功的链接
+let currentBatchUrls = []; // 记录本次导入产生的链接
 
 try {
   uploadTimes = JSON.parse(localStorage.getItem(TIME_KEY) || '{}');
@@ -417,8 +406,8 @@ async function handleFiles(fileList){
     return;
   }
   
-  currentBatchUrls = []; // 清空上次记录
-  $('#batchCopyWrap').style.display = 'none'; // 隐藏旧按钮
+  currentBatchUrls = []; // 每次导入前清空
+  $('#batchCopyWrap').style.display = 'none'; // 隐藏之前的按钮
   
   for (const f of arr){
     await doUpload(f); 
@@ -426,12 +415,13 @@ async function handleFiles(fileList){
   
   await loadGallery();
   
-  // 如果本次有上传成功的，显示一键复制按钮
+  // 如果本次导入有成功的，显示一键复制按钮
   if (currentBatchUrls.length > 0) {
     const btn = $('#batchCopyBtn');
-    btn.textContent = `✨ 一键复制本次上传的 ${currentBatchUrls.length} 个链接`;
+    btn.textContent = `✨ 一键复制刚刚导入的 ${currentBatchUrls.length} 个链接`;
     $('#batchCopyWrap').style.display = 'block';
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); // 滚到底部提示用户
+    // 滚动到底部提示用户
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   }
 }
 
@@ -467,7 +457,6 @@ function makeBtn(text, cls){
 function renderGallery(){
   const gallery = $('#gallery');
   gallery.innerHTML = '';
-  $('#selectAllBtn').checked = false; // 重置全选
   
   let items = files.filter(f => isAllowed(f.name));
   
@@ -486,7 +475,7 @@ function renderGallery(){
   if (!items.length){
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = getToken() ? '还没有文件，上传一个试试吧～' : '请先在上方保存 GitHub Token';
+    empty.textContent = getToken() ? '还没有文件，导入一个试试吧～' : '请先在上方保存 GitHub Token';
     gallery.appendChild(empty);
     return;
   }
@@ -497,16 +486,6 @@ function renderGallery(){
     const url = urlOf(f.name);
     const card = document.createElement('div');
     card.className = 'item';
-
-    /* 左侧复选框 */
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'item-checkbox';
-    cb.value = url;
-    cb.addEventListener('change', () => {
-      card.classList.toggle('selected', cb.checked);
-      updateSelectAllState();
-    });
 
     /* 预览区 */
     const media = document.createElement('div');
@@ -570,32 +549,11 @@ function renderGallery(){
     bottomRow.append(link, actions);
     meta.append(nameEl, bottomRow);
     
-    card.append(cb, media, meta);
+    card.append(media, meta);
     frag.appendChild(card);
   });
 
   gallery.appendChild(frag);
-}
-
-/* 更新全选框的状态 */
-function updateSelectAllState() {
-  const allCbs = document.querySelectorAll('.item-checkbox');
-  const checkedCbs = document.querySelectorAll('.item-checkbox:checked');
-  const selectAllBtn = $('#selectAllBtn');
-  
-  if (allCbs.length === 0) {
-    selectAllBtn.checked = false;
-    selectAllBtn.indeterminate = false;
-  } else if (checkedCbs.length === allCbs.length) {
-    selectAllBtn.checked = true;
-    selectAllBtn.indeterminate = false;
-  } else if (checkedCbs.length === 0) {
-    selectAllBtn.checked = false;
-    selectAllBtn.indeterminate = false;
-  } else {
-    selectAllBtn.checked = false;
-    selectAllBtn.indeterminate = true; // 半选状态
-  }
 }
 
 /* ---------- 删除 ---------- */
@@ -652,40 +610,15 @@ function bindEvents(){
     toast('图库已刷新', 'info');
   });
 
-  // 一键复制本次上传
+  // 一键复制本次导入
   $('#batchCopyBtn').addEventListener('click', async () => {
     if (currentBatchUrls.length === 0) return;
     const text = currentBatchUrls.join('\n'); // 一行一个链接
     const ok = await copyText(text);
     if (ok) {
-      toast(`已成功复制 ${currentBatchUrls.length} 个链接！`, 'success');
+      toast(`已成功复制刚刚导入的 ${currentBatchUrls.length} 个链接！`, 'success');
     } else {
       toast('复制失败，请检查浏览器权限', 'error');
-    }
-  });
-
-  // 图库全选
-  $('#selectAllBtn').addEventListener('change', (e) => {
-    const isChecked = e.target.checked;
-    document.querySelectorAll('.item-checkbox').forEach(cb => {
-      cb.checked = isChecked;
-      cb.closest('.item').classList.toggle('selected', isChecked);
-    });
-  });
-
-  // 图库批量复制选中
-  $('#batchCopySelectedBtn').addEventListener('click', async () => {
-    const checked = document.querySelectorAll('.item-checkbox:checked');
-    if (checked.length === 0) {
-      toast('请先勾选需要复制的文件', 'error');
-      return;
-    }
-    const urls = Array.from(checked).map(cb => cb.value);
-    const ok = await copyText(urls.join('\n'));
-    if (ok) {
-      toast(`已成功复制 ${urls.length} 个选中链接！`, 'success');
-    } else {
-      toast('复制失败', 'error');
     }
   });
 
