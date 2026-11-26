@@ -123,16 +123,21 @@
   }
   .media img{width:100%;height:100%;object-fit:cover;display:block}
   .media audio{width:76px;height:100%;object-fit:contain;padding:0 4px}
+  
+  /* 加载动画 */
+  .spinner {
+    width: 20px; height: 20px;
+    border: 2px solid #e0d8f0; border-top-color: #7c4dff;
+    border-radius: 50%; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  
   .err-box{
     display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;
-    background:#f6f4fd;
+    background:#f6f4fd;cursor:pointer;text-align:center;padding:4px;
   }
-  .err-box span{font-size:11px;color:#e5484d;margin-bottom:4px}
-  .err-btns{display:flex;gap:4px;}
-  .err-btns button{
-    padding:2px 4px;font-size:10px;border-radius:4px;border:1px solid #ddd;background:#fff;cursor:pointer;
-  }
-  .err-btns button:active{background:#eee;}
+  .err-box span{font-size:11px;color:#e5484d;line-height:1.2;margin-bottom:4px}
+  .err-box span.sub{font-size:10px;color:#a49bc0;margin-bottom:0}
   
   /* 信息区域 */
   .meta{
@@ -236,8 +241,8 @@
 
 <div class="footer">
   提示：<br>
-  1. 新上传的图片在 GitHub Pages 上需要 1~3 分钟来构建部署，期间打不开是正常的。<br>
-  2. 如果过了几分钟还是加载失败，或者一直转圈，请点击失败框里的 **“换加速源”**。
+  1. 使用 <b>懒加载+极速通道</b> 后，下划到哪张图就会秒载哪张图。<br>
+  2. 刚上传的图片，GitHub 官方可能还在部署（通常 1-2 分钟），请稍等片刻即可。
 </div>
 
 <div id="toastWrap"></div>
@@ -249,7 +254,7 @@ const REPO   = 'yu';          // 仓库名
 const BRANCH = 'main';        // 分支
 
 const SITE_BASE = `https://${OWNER}.github.io/${REPO}`;
-const CDN_BASE  = `https://cdn.jsdelivr.net/gh/${OWNER}/${REPO}@${BRANCH}`; // 备用加速源
+const RAW_BASE  = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 const API_BASE  = `https://api.github.com/repos/${OWNER}/${REPO}/contents`;
 const TOKEN_KEY = 'gh_pages_image_host_token';
 const TIME_KEY  = 'gh_pages_image_upload_times';
@@ -401,7 +406,21 @@ async function doUpload(file){
   const row = addUploadRow(file.name);
   try {
     const base64 = await fileToBase64(file);
-    await uploadContent(file.name, base64, p => setRowProgress(row, p));
+    const resData = await uploadContent(file.name, base64, p => setRowProgress(row, p));
+    
+    // 【核心修改】上传成功后立刻在前端手动插入图片记录
+    const newFile = {
+      name: file.name,
+      path: file.name,
+      sha: resData.content.sha,
+      size: resData.content.size,
+      type: 'file'
+    };
+    // 如果有同名文件（覆盖），先移除旧的
+    const existingIdx = files.findIndex(f => f.name === newFile.name);
+    if (existingIdx > -1) files.splice(existingIdx, 1);
+    files.unshift(newFile); // 插在最前面
+
     setRowState(row, 'done', '✔ 上传成功');
     toast(`${file.name} 上传成功`, 'success');
     
@@ -423,13 +442,15 @@ async function handleFiles(fileList){
   $('#batchCopyWrap').style.display = 'none';
   
   for (const f of arr) await doUpload(f); 
-  await loadGallery();
+  
+  // 【核心修改】直接渲染本地数据，不再调用 loadGallery()，瞬间显示！
+  renderGallery();
   
   if (currentBatchUrls.length > 0) {
     const btn = $('#batchCopyBtn');
     btn.textContent = `✨ 一键复制刚刚导入的 ${currentBatchUrls.length} 个链接`;
     $('#batchCopyWrap').style.display = 'block';
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    // 取消了自动滚动到底部的代码
   }
 }
 
@@ -455,6 +476,56 @@ function makeBtn(text, cls){
   return b;
 }
 
+/* 懒加载观察器 */
+const lazyObserver = new IntersectionObserver((entries, obs) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const el = entry.target;
+      if (el.dataset.load === 'true') {
+        loadRealImage(el);
+        obs.unobserve(el); 
+      }
+    }
+  });
+}, { rootMargin: '150px' }); 
+
+function loadRealImage(placeholder){
+  const originUrl = placeholder.dataset.origin;
+  const rawUrl = placeholder.dataset.raw;
+  const wsrvUrl = `https://wsrv.nl/?url=${encodeURIComponent(originUrl)}`;
+  
+  const sources = [rawUrl, wsrvUrl, originUrl];
+  let attempt = 0;
+
+  const tryLoad = () => {
+    if (attempt >= sources.length) {
+      placeholder.innerHTML = '<div class="err-box"><span>暂无法加载</span><span class="sub">点击重试</span></div>';
+      placeholder.onclick = (e) => {
+        e.stopPropagation();
+        attempt = 0;
+        tryLoad();
+      };
+      return;
+    }
+
+    const tempImg = new Image();
+    tempImg.onload = () => {
+      placeholder.innerHTML = '';
+      placeholder.style.background = 'transparent';
+      placeholder.onclick = null;
+      placeholder.appendChild(tempImg);
+    };
+    tempImg.onerror = () => {
+      attempt++;
+      tryLoad();
+    };
+    
+    tempImg.src = sources[attempt] + (sources[attempt].includes('?') ? '&' : '?') + '_t=' + Date.now();
+  };
+
+  tryLoad();
+}
+
 function renderGallery(){
   const gallery = $('#gallery');
   gallery.innerHTML = '';
@@ -463,6 +534,7 @@ function renderGallery(){
   
   let items = files.filter(f => isAllowed(f.name));
   
+  // 排序：时间戳最新的在最上面
   items.sort((a, b) => {
     const timeA = uploadTimes[a.name] || 0;
     const timeB = uploadTimes[b.name] || 0;
@@ -483,8 +555,9 @@ function renderGallery(){
   const frag = document.createDocumentFragment();
 
   items.forEach(f => {
-    const url = urlOf(f.name);
-    const cdnUrl = `${CDN_BASE}/${encPath(f.name)}`; // 备用加速链接
+    const originUrl = urlOf(f.name);
+    const rawUrl = `${RAW_BASE}/${encPath(f.name)}`;
+
     const card = document.createElement('div');
     card.className = 'item';
 
@@ -503,39 +576,20 @@ function renderGallery(){
     media.className = 'media';
     
     if (isImage(f.name)){
-      const loadImg = (srcUrl) => {
-        media.innerHTML = '';
-        const img = document.createElement('img');
-        img.loading = 'lazy';
-        img.alt = f.name;
-        img.src = srcUrl + (srcUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-        
-        img.addEventListener('error', () => {
-          media.innerHTML = '';
-          const errBox = document.createElement('div');
-          errBox.className = 'err-box';
-          errBox.innerHTML = '<span>加载失败</span><div class="err-btns"><button id="retryBtn">重试</button><button id="cdnBtn">换加速源</button></div>';
-          
-          errBox.querySelector('#retryBtn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            loadImg(url); // 原链接重试
-          });
-          errBox.querySelector('#cdnBtn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            toast('正在切换 jsDelivr 加速源...', 'info');
-            loadImg(cdnUrl); // 切换到备用加速
-          });
-          
-          media.appendChild(errBox);
-        });
-        media.appendChild(img);
-      };
-      loadImg(url); // 初始先使用 github.io 链接
+      const placeholder = document.createElement('div');
+      placeholder.innerHTML = '<div class="spinner"></div>';
+      placeholder.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;';
+      placeholder.dataset.origin = originUrl;
+      placeholder.dataset.raw = rawUrl;
+      placeholder.dataset.load = 'true';
+      
+      media.appendChild(placeholder);
+      lazyObserver.observe(placeholder); 
     } else {
       const audio = document.createElement('audio');
       audio.controls = true;
       audio.preload = 'none';
-      audio.src = url;
+      audio.src = originUrl;
       media.appendChild(audio);
     }
 
@@ -555,7 +609,7 @@ function renderGallery(){
     link.type = 'text';
     link.className = 'link';
     link.readOnly = true;
-    link.value = url;
+    link.value = originUrl;
     link.addEventListener('focus', () => link.select());
 
     const actions = document.createElement('div');
@@ -563,12 +617,12 @@ function renderGallery(){
 
     const btnCopy = makeBtn('复制', 'btn small');
     btnCopy.addEventListener('click', async () => {
-      const ok = await copyText(url);
+      const ok = await copyText(originUrl);
       toast(ok ? '链接已复制' : '复制失败', ok ? 'success' : 'error');
     });
 
     const btnOpen = makeBtn('打开', 'btn small');
-    btnOpen.addEventListener('click', () => window.open(url, '_blank'));
+    btnOpen.addEventListener('click', () => window.open(originUrl, '_blank'));
 
     const btnDel = makeBtn('删除', 'btn small danger');
     btnDel.addEventListener('click', () => onDelete(f));
@@ -728,7 +782,7 @@ function bindEvents(){
     dz.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add('drag'); })
   );
   ['dragleave', 'dragend'].forEach(ev =>
-    dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('drag'); })
+    dz.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('drag'); })
   );
   dz.addEventListener('drop', e => {
     e.preventDefault();
