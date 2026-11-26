@@ -72,10 +72,23 @@
   .urow.fail .ustate{color:#e5484d}
   .urow.fail .ubar i{background:#e5484d}
   
+  /* 批量复制本次上传按钮区 */
+  #batchCopyWrap{
+    display:none;margin-top:15px;padding-top:15px;border-top:1px dashed #e3ddf7;
+    text-align:center;
+  }
+  #batchCopyWrap .btn{
+    width:100%;padding:12px;font-size:15px;
+    background:linear-gradient(135deg,#2f9e44,#40c057);color:#fff;
+    box-shadow:0 4px 12px rgba(47,158,68,.25);
+  }
+  
   /* ======== 图库列表模式 (紧凑) ======== */
-  .gallery-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .gallery-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px}
   .gallery-head h2{margin:0}
-  .gallery-head span{font-size:12px;color:#9188ad}
+  .gallery-tools{display:flex;align-items:center;gap:12px;font-size:13px;color:#6a3df5;font-weight:600;}
+  .gallery-tools label{display:flex;align-items:center;gap:5px;cursor:pointer;}
+  .gallery-tools input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:#7c4dff;}
   
   .grid{
     display:flex;flex-direction:column;gap:10px;
@@ -83,13 +96,19 @@
   .empty{width:100%;padding:40px 0;text-align:center;color:#a49bc0;font-size:14px}
   
   .item{
-    display:flex;align-items:center;gap:12px;padding:10px;
+    display:flex;align-items:center;gap:10px;padding:10px;
     background:#fff;border:1px solid #eee8fb;border-radius:12px;
     box-shadow:0 2px 8px rgba(90,70,160,.05);
-    transition:box-shadow .18s;
+    transition:box-shadow .18s, border-color .18s;
   }
   .item:hover{
     box-shadow:0 4px 14px rgba(124,77,255,.15);
+  }
+  .item.selected{
+    border-color:#a855f7;background:#fdfcff;
+  }
+  .item-checkbox{
+    width:18px;height:18px;flex-shrink:0;cursor:pointer;accent-color:#7c4dff;
   }
   
   /* 缩略图区域 */
@@ -179,13 +198,21 @@
         accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.ico,.mp3,.wav,.m4a,.ogg,.flac,.aac,image/*,audio/*" />
     </div>
     <div id="uploadList"></div>
+    <!-- 批量复制本次上传的按钮（默认隐藏） -->
+    <div id="batchCopyWrap">
+      <button class="btn" id="batchCopyBtn">复制本次上传的链接</button>
+    </div>
   </section>
 
   <!-- 图库 -->
   <section class="card">
     <div class="gallery-head">
       <h2>③ 图库</h2>
-      <span id="count">共 0 个文件</span>
+      <div class="gallery-tools">
+        <label><input type="checkbox" id="selectAllBtn" /> 全选</label>
+        <button class="btn small purple" id="batchCopySelectedBtn" type="button">复制选中链接</button>
+        <span id="count" style="font-size:12px;color:#9188ad;font-weight:normal;margin-left:8px;">共 0 个文件</span>
+      </div>
     </div>
     <div class="grid" id="gallery"></div>
   </section>
@@ -207,7 +234,7 @@ const BRANCH = 'main';        // 分支
 const SITE_BASE = `https://${OWNER}.github.io/${REPO}`;
 const API_BASE  = `https://api.github.com/repos/${OWNER}/${REPO}/contents`;
 const TOKEN_KEY = 'gh_pages_image_host_token';
-const TIME_KEY  = 'gh_pages_image_upload_times'; // 记录上传时间的键名
+const TIME_KEY  = 'gh_pages_image_upload_times';
 /* =================================================== */
 
 const IMAGE_EXT = ['jpg','jpeg','png','gif','webp','svg','bmp','ico'];
@@ -215,7 +242,8 @@ const AUDIO_EXT = ['mp3','wav','m4a','ogg','flac','aac'];
 
 const $ = s => document.querySelector(s);
 let files = [];
-let uploadTimes = {}; // 存放 文件名 => 时间戳
+let uploadTimes = {};
+let currentBatchUrls = []; // 记录本次拖拽/选择上传成功的链接
 
 try {
   uploadTimes = JSON.parse(localStorage.getItem(TIME_KEY) || '{}');
@@ -326,7 +354,6 @@ async function uploadContent(name, base64, onProgress){
   try {
     return await putFile(name, base64, null, onProgress);
   } catch(err){
-    // 422：文件已存在 → 取 sha 后覆盖
     if (err.status === 422){
       const res = await fetch(`${API_BASE}/${encPath(name)}?ref=${BRANCH}`, { headers: authHeaders() });
       if (res.ok){
@@ -371,9 +398,10 @@ async function doUpload(file){
     setRowState(row, 'done', '✔ 上传成功');
     toast(`${file.name} 上传成功`, 'success');
     
-    // 记录上传时间，用于图库排序
+    // 记录时间与本次批量链接
     uploadTimes[file.name] = Date.now();
     localStorage.setItem(TIME_KEY, JSON.stringify(uploadTimes));
+    currentBatchUrls.push(urlOf(file.name));
     
   } catch(err){
     setRowState(row, 'fail', '✘ ' + err.message);
@@ -388,11 +416,23 @@ async function handleFiles(fileList){
     toast('请先在上方保存 GitHub Token', 'error');
     return;
   }
-  // 顺序上传
+  
+  currentBatchUrls = []; // 清空上次记录
+  $('#batchCopyWrap').style.display = 'none'; // 隐藏旧按钮
+  
   for (const f of arr){
     await doUpload(f); 
   }
+  
   await loadGallery();
+  
+  // 如果本次有上传成功的，显示一键复制按钮
+  if (currentBatchUrls.length > 0) {
+    const btn = $('#batchCopyBtn');
+    btn.textContent = `✨ 一键复制本次上传的 ${currentBatchUrls.length} 个链接`;
+    $('#batchCopyWrap').style.display = 'block';
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); // 滚到底部提示用户
+  }
 }
 
 /* ---------- 图库 ---------- */
@@ -427,22 +467,19 @@ function makeBtn(text, cls){
 function renderGallery(){
   const gallery = $('#gallery');
   gallery.innerHTML = '';
+  $('#selectAllBtn').checked = false; // 重置全选
+  
   let items = files.filter(f => isAllowed(f.name));
   
-  // ======== 排序逻辑开始 ========
+  // 排序逻辑
   items.sort((a, b) => {
     const timeA = uploadTimes[a.name] || 0;
     const timeB = uploadTimes[b.name] || 0;
-    
-    // 如果两者都有本地记录（或者一个有记录，另一个直接用文件名字典序）
     if (timeA !== timeB) {
-      return timeB - timeA; // 降序：最新上传的排在前面
+      return timeB - timeA; // 最新上传的排在前面
     }
-    
-    // 本地都没有记录的旧文件，按自然数字顺序倒序排列（通常是基于文件名的生成时间）
     return b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' });
   });
-  // ======== 排序逻辑结束 ========
 
   $('#count').textContent = `共 ${items.length} 个文件`;
 
@@ -461,7 +498,17 @@ function renderGallery(){
     const card = document.createElement('div');
     card.className = 'item';
 
-    /* 左侧预览区 */
+    /* 左侧复选框 */
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'item-checkbox';
+    cb.value = url;
+    cb.addEventListener('change', () => {
+      card.classList.toggle('selected', cb.checked);
+      updateSelectAllState();
+    });
+
+    /* 预览区 */
     const media = document.createElement('div');
     media.className = 'media';
     if (isImage(f.name)){
@@ -510,7 +557,7 @@ function renderGallery(){
     const btnCopy = makeBtn('复制', 'btn small');
     btnCopy.addEventListener('click', async () => {
       const ok = await copyText(url);
-      toast(ok ? '链接已复制到剪贴板' : '复制失败，请手动选中输入框复制', ok ? 'success' : 'error');
+      toast(ok ? '链接已复制' : '复制失败', ok ? 'success' : 'error');
     });
 
     const btnOpen = makeBtn('打开', 'btn small');
@@ -523,11 +570,32 @@ function renderGallery(){
     bottomRow.append(link, actions);
     meta.append(nameEl, bottomRow);
     
-    card.append(media, meta);
+    card.append(cb, media, meta);
     frag.appendChild(card);
   });
 
   gallery.appendChild(frag);
+}
+
+/* 更新全选框的状态 */
+function updateSelectAllState() {
+  const allCbs = document.querySelectorAll('.item-checkbox');
+  const checkedCbs = document.querySelectorAll('.item-checkbox:checked');
+  const selectAllBtn = $('#selectAllBtn');
+  
+  if (allCbs.length === 0) {
+    selectAllBtn.checked = false;
+    selectAllBtn.indeterminate = false;
+  } else if (checkedCbs.length === allCbs.length) {
+    selectAllBtn.checked = true;
+    selectAllBtn.indeterminate = false;
+  } else if (checkedCbs.length === 0) {
+    selectAllBtn.checked = false;
+    selectAllBtn.indeterminate = false;
+  } else {
+    selectAllBtn.checked = false;
+    selectAllBtn.indeterminate = true; // 半选状态
+  }
 }
 
 /* ---------- 删除 ---------- */
@@ -549,12 +617,10 @@ async function onDelete(file){
     toast('已删除', 'success');
     files = files.filter(x => x.path !== file.path);
     
-    // 删除本地时间记录
     if (uploadTimes[file.name]) {
       delete uploadTimes[file.name];
       localStorage.setItem(TIME_KEY, JSON.stringify(uploadTimes));
     }
-    
     renderGallery();
   } catch(err){
     toast('删除失败：' + err.message, 'error');
@@ -584,6 +650,43 @@ function bindEvents(){
     if (!getToken()){ toast('请先保存 Token', 'error'); return; }
     await loadGallery();
     toast('图库已刷新', 'info');
+  });
+
+  // 一键复制本次上传
+  $('#batchCopyBtn').addEventListener('click', async () => {
+    if (currentBatchUrls.length === 0) return;
+    const text = currentBatchUrls.join('\n'); // 一行一个链接
+    const ok = await copyText(text);
+    if (ok) {
+      toast(`已成功复制 ${currentBatchUrls.length} 个链接！`, 'success');
+    } else {
+      toast('复制失败，请检查浏览器权限', 'error');
+    }
+  });
+
+  // 图库全选
+  $('#selectAllBtn').addEventListener('change', (e) => {
+    const isChecked = e.target.checked;
+    document.querySelectorAll('.item-checkbox').forEach(cb => {
+      cb.checked = isChecked;
+      cb.closest('.item').classList.toggle('selected', isChecked);
+    });
+  });
+
+  // 图库批量复制选中
+  $('#batchCopySelectedBtn').addEventListener('click', async () => {
+    const checked = document.querySelectorAll('.item-checkbox:checked');
+    if (checked.length === 0) {
+      toast('请先勾选需要复制的文件', 'error');
+      return;
+    }
+    const urls = Array.from(checked).map(cb => cb.value);
+    const ok = await copyText(urls.join('\n'));
+    if (ok) {
+      toast(`已成功复制 ${urls.length} 个选中链接！`, 'success');
+    } else {
+      toast('复制失败', 'error');
+    }
   });
 
   // 上传区
